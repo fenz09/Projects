@@ -1,24 +1,145 @@
-from typing import Optional
+from __future__ import annotations
+from typing import Optional, TYPE_CHECKING
 import tcod.event
-from actions import action, escape_action, bump_action
+from actions import action, escape_action, bump_action, WaitAction
+
+MoveKeys = {
+    tcod.event.K_UP: (0, -1),
+    tcod.event.K_DOWN: (0, 1),
+    tcod.event.K_LEFT: (-1, 0),
+    tcod.event.K_RIGHT: (1, 0),
+    tcod.event.K_HOME: (-1, -1),
+    tcod.event.K_END: (-1, 1),
+    tcod.event.K_PAGEUP: (1, -1),
+    tcod.event.K_PAGEDOWN: (1, 1),
+    tcod.event.K_KP_1: (-1, 1),
+    tcod.event.K_KP_2: (0, 1),
+    tcod.event.K_KP_3: (1, 1),
+    tcod.event.K_KP_4: (-1, 0),
+    tcod.event.K_KP_6: (1, 0),
+    tcod.event.K_KP_7: (-1, -1),
+    tcod.event.K_KP_8: (0, -1),
+    tcod.event.K_KP_9: (1, -1),
+    tcod.event.K_W: (0, -1),
+    tcod.event.K_S: (0, 1),
+    tcod.event.K_D: (1, 0),
+    tcod.event.K_A: (-1, 0),
+    tcod.event.K_h: (-1, 0),
+    tcod.event.K_j: (0, 1),
+    tcod.event.K_k: (0, -1),
+    tcod.event.K_l: (1, 0),
+    tcod.event.K_y: (-1, -1),
+    tcod.event.K_u: (1, -1),
+    tcod.event.K_b: (-1, 1),
+    tcod.event.K_n: (1, 1),
+}
+
+WaitKeys = {
+    tcod.event.K_PERIOD,
+    tcod.event.K_KP_6,
+    tcod.event.K_CLEAR,
+}
+
+if TYPE_CHECKING:
+    from engine import Engine
 
 class EventHandler(tcod.event.EventDispatch[action]):
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def handle_events(self, context: tcod.context.Context) -> None:
+        for event in tcod.event.wait():
+            context.convert_event(event)
+            self.dispatch(event)
+        raise NotImplementedError()
+
+    def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
+        if self.engine.game_map.in_bounds(event.tile.x, event.tile.y):
+            self.engine.mouse_location = (event.tile_x, event.tile_y)
+
     def ev_quit(self, event: tcod.event.Quit) -> Optional[action]:
         raise SystemExit()
+    def on_render(self, console: tcod.Console) -> None:
+        self.engine.render(console)
+    
+class MainGameEventHandler(EventHandler):
+    def handle_events(self, context: tcod.context.Context) -> None:
+        for event in tcod.event.wait():
+            context.convert_event(event)
+            action = self.dispatch(event)
+            if action is None:
+                continue
+            action.perform()
+
+            self.engine.handle_enemy_turns()
+            self.engine.update_fov()
+
     
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[action]:
         action: Optional[action] = None
         key = event.sym
+        player = self.engine.player
 
-        if key == tcod.event.K_W:
-            action = bump_action(dx=0, dy=-1)
-        elif key == tcod.event.K_S:
-            action = bump_action(dx=0, dy=1)
-        elif key == tcod.event.K_D:
-            action = bump_action(dx=1, dy=0)
-        elif key == tcod.event.K_A:
-            action = bump_action(dx=-1, dy=0)
+        if key in MoveKeys:
+            dx, dy = MoveKeys[key]
+            action = bump_action(player, dx=dx, dy=dy)
+        elif key in WaitKeys:
+            action = WaitAction(player)
         elif key == tcod.event.K_ESCAPE:
-            action = escape_action()
+            action = escape_action(player)
+        elif key == tcod.event.K_v:
+            self.engine.event_handler = HistoryViewer(self.engine)
 
         return action
+class GameOverEventHandler(EventHandler):
+    def handle_events(self, context: tcod.context.Context) -> None:
+        for event in tcod.event.wait():
+            context.convert_event(event)
+            action = self.dispatch(event)
+            if action is None:
+                continue
+            action.perform()
+    def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[action]:
+        action: Optional[action] = None
+        key = event.sym
+        if key == tcod.event.K_ESCAPE:
+            action = escape_action(self.engine.player)
+        return action
+CURSOR_Y_KEYS = {
+    tcod.event.K_UP: -1,
+    tcod.event.K_DOWN: 1,
+    tcod.event.K_PAGEUP: -10,
+    tcod.event.K_PAGEDOWN: 10,
+}
+class HistoryViewer(EventHandler):
+    def __init__(self, engine: Engine):
+        super().__init__(engine)
+        self.log_length = len(engine.message_log.messages)
+        self.cursor = self.log_length - 1
+
+    def on_render(self, console: tcod.Console) -> None:
+        super().on_render(console)
+        log_console = tcod.Console(console.width - 6, console.height - 6)
+        log_console.draw_frame(0, 0, log_console.width, log_console.height,)
+        log_console.print_box(0, 0, log_console.width, 1, "<History Viewer>", alignment = tcod.CENTER)
+
+        self.engine.message_log.render_messages(log_console, 1, 1, log_console.width - 2, log_console.height - 2, self.engine.message_log.messages [: self.cursor + 1],)
+        log_console.blit(console, 3, 3)
+
+    def ev_keydown(self, event: tcod.event.KeyDown) -> None:
+        if event.sym in CURSOR_Y_KEYS:
+            adjust = CURSOR_Y_KEYS[event.sym]
+            if adjust < 0 and self.cursor == 0:
+                self.cursor = self.log_length - 1
+            elif adjust > 0 and self.cursor == self.log_length - 1:
+                self.cursor = 0 
+            else:
+                self.cursor = max(0, min(self.cursor + adjust, self.log_length - 1))
+        elif event.sym == tcod.event.K_HOME:
+            self.cursor = 0
+        elif event.sym == tcod.event.K_END:
+            self.cursor = self.log_length - 1
+        else:
+            self.engine.event_handler = MainGameEventHandler(self.engine)
+        
+

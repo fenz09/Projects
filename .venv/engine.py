@@ -1,28 +1,25 @@
 from typing import Set, Iterable, Any
 from tcod.context import Context
 from tcod.console import Console
-from game_map import Gamemap
 from tcod.map import compute_fov
-from typing import Iterable, Any
-from entity import Entity
+from typing import TYPE_CHECKING
 from actions import escape_action, movement_action
-from input_handlers import EventHandler
+from input_handlers import MainGameEventHandler as M
+from render_functions import render_bar, render_names_at_mouse_location
+from messege_log import MessageLog
+if TYPE_CHECKING:
+    from entity import Actor
+    from game_map import Gamemap
+    from input_handlers import EventHandler
 
 class Engine:
-    def __init__(self, event_handler: EventHandler, game_map: Gamemap, player: Entity) -> None: 
-        self.event_handler = event_handler
+    game_map: Gamemap
+    def __init__(self, player: "Actor"):
         self.player = player
-        self.game_map = game_map
-        self.update_fov()
+        self.event_handler = M(self)
+        self.mouse_location = (0, 0)
+        self.message_log = MessageLog()
 
-    def handle_events(self, events: Iterable[Any]) -> None:
-        for event in events:
-            action = self.event_handler.dispatch(event)
-            if action is None:
-                continue
-            action.preform(self, self.player)
-            self.update_fov()
-            self.handle_enemy_turns()
     def update_fov(self) -> None:
         self.game_map.visible[:] = compute_fov(
             self.game_map.tiles["transparent"],
@@ -31,12 +28,15 @@ class Engine:
         )
         self.game_map.explored |= self.game_map.visible
 
-    def render(self, console: Console, context: Context) -> None:
+    def render(self, console: Console) -> None:
         self.game_map.render(console)
-        context.present(console)
-        console.clear()
+        self.message_log.render(console = console, x = 21, y = 45, width = 40, height = 5)
+        render_bar(console = console, current_value = self.player.fighter.hp, maximum_value = self.player.fighter.max_hp, total_width = 20)
+        render_names_at_mouse_location(console = console, x = 21, y = 44, engine = self)
+
     def handle_enemy_turns(self) -> None:
-        for entity in self.game_map.entities - {self.player}:
-            print(f"{entity.name} takes its turn.")
+        for entity in set(self.game_map.actors) - {self.player}:
+            if entity.ai:
+                entity.ai.perform()
 
 
