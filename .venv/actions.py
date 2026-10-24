@@ -1,11 +1,12 @@
 from __future__ import annotations
 import color
+import exceptions
 from typing import Optional, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from engine import Engine
-    from entity import Entity
+    from entity import Actor,Entity, Item
 
-class action:
+class Action:
     def perform(self) -> None:
         raise NotImplementedError()
     def __init__(self, entity: Actor) -> None:
@@ -16,7 +17,24 @@ class action:
     def engine(self) -> Engine:
         return self.entity.gamemap.engine
 
-class action_with_direction(action):
+class ItemAction(Action):
+    def __init__ (self, entity: Actor, item: Item, target_xy: Optional[Tuple[int, int]] = None):
+        super().__init__(entity)
+        self.item = item
+        if not target_xy:
+            target_xy = entity.x, entity.y
+        self.target_xy = target_xy
+
+    @property 
+    def target_actor(self) -> Optional[Actor]:
+        return self.engine.game_map.get_actor_at_location(*self.target_xy)
+
+    def perform(self) -> None:
+        self.item.consumable.activate(self)
+        
+
+
+class ActionWithDirection(Action):
     def __init__(self, entity : Actor, dx: int, dy: int):
         super().__init__(entity)
         self.dx = dx
@@ -33,26 +51,22 @@ class action_with_direction(action):
         return self.engine.game_map.get_actor_at_location(*self.dest_xy)
     def perform(self) -> None:
         raise NotImplementedError()
-        
-class escape_action(action):
-    def perform(self) -> None:
-        raise SystemExit()
-class movement_action(action_with_direction):
+class MovementAction(ActionWithDirection):
     def perform(self) -> None:
         dest_x, dest_y = self.dest_xy
 
         if not self.engine.game_map.in_bounds(dest_x, dest_y):
-            return
+            raise exceptions.Impossible("That way is blocked.")
         if not self.engine.game_map.tiles["walkable"][dest_x][dest_y]:
-            return
+            raise exceptions.Impossible("That way is blocked.")
         if self.engine.game_map.get_blocking_entity_at_location(dest_x, dest_y):
-            return
+            raise exceptions.Impossible("That way is blocked.")
         self.entity.move(dx=self.dx, dy=self.dy)
-class MeleeAction(action_with_direction):
+class MeleeAction(ActionWithDirection):
     def perform(self) -> None:
         target = self.target_actor
         if not target:
-            return
+            raise exceptions.Impossible("There is no target to attack.")
         damage = self.entity.fighter.power - target.fighter.defense#
         attack_desc = f"{self.entity.name} attacks {target.name} for {damage} damage!"
         if self.entity is self.engine.player:
@@ -65,12 +79,32 @@ class MeleeAction(action_with_direction):
         else:
             self.engine.message_log.add_message(f'{attack_desc} but it has no effect.', color.info)
 
-class bump_action(action_with_direction):
+class BumpAction(ActionWithDirection):
     def perform(self) -> None:
         if self.target_actor:
             return MeleeAction(self.entity, self.dx, self.dy).perform()
         else:
-           return movement_action(self.entity, self.dx, self.dy).perform()
-class WaitAction(action):
+           return MovementAction(self.entity, self.dx, self.dy).perform()
+class WaitAction(Action):
     def perform(self) -> None:
         pass
+class pickupAction(Action):
+    def __init__(self, entity: Actor):
+        super().__init__(entity)
+    def perform(self) -> None:
+        actor_locationx = self.entity.x
+        actor_locationy = self.entity.y
+        inventory = self.entity.inventory
+        for item in self.engine.game_map.items:
+            if actor_locationx == item.x and actor_locationy == item.y:
+                if len(inventory.items) >= inventory.capacity:
+                    raise exceptions.Impossible("Your inventory is full.")
+                self.engine.game_map.entities.remove(item)
+                inventory.items.append(item)
+                self.engine.message_log.add_message(f"You pick up the {item.name}.", color.info)
+                return
+        raise exceptions.Impossible("There is nothing here to pick up.")
+class DropItem(ItemAction):
+    def perform(self) -> None:
+        self.entity.inventory.items.remove(self.item)
+

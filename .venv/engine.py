@@ -7,6 +7,7 @@ from actions import escape_action, movement_action
 from input_handlers import MainGameEventHandler as M
 from render_functions import render_bar, render_names_at_mouse_location
 from messege_log import MessageLog
+import exceptions
 if TYPE_CHECKING:
     from entity import Actor
     from game_map import Gamemap
@@ -37,6 +38,9 @@ class Engine:
     def handle_enemy_turns(self) -> None:
         for entity in set(self.game_map.actors) - {self.player}:
             if entity.ai:
-                entity.ai.perform()
+                try:
+                    entity.ai.preform()
+                except exceptions.Impossible:
+                    pass
 
 

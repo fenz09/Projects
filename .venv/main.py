@@ -3,6 +3,7 @@ import tcod
 from engine import Engine
 from entity import Entity
 import color
+import traceback
 import copy
 from procgen import generate_dungeon  
 
@@ -15,6 +16,7 @@ def main() -> None:
     room_min_size = 6
     max_rooms = 30 
     max_monsters_per_room = 3
+    max_items_per_room = 2
     tileset = tcod.tileset.load_tilesheet(
         "dejavu10x10_gs_tc.png", 32, 8, tcod.tileset.CHARMAP_TCOD)
     player = copy.deepcopy(entity_factory.player)
@@ -27,6 +29,7 @@ def main() -> None:
         map_height=map_height,
         engine=engine,
         max_monsters_per_room=max_monsters_per_room,
+        max_items_per_room=max_items_per_room,
     )
     engine.update_fov()
     engine.message_log.add_message("Hello traveler! Welcome to the dungeon!", color.welcome_text)
@@ -44,6 +47,12 @@ def main() -> None:
             root_console.clear()
             engine.event_handler.on_render(console=root_console)
             context.present(root_console)
-            engine.event_handler.handle_events(context)
+            try:
+                for event in tcod.event.wait():
+                    context.convert_event(event)
+                    engine.event_handler.handle_events(event)
+            except Exception:
+                traceback.print_exc()
+                engine.message_log.add_message(traceback.format_exc(), color.error)
 if __name__ == "__main__":
     main()

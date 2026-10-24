@@ -3,7 +3,7 @@ import numpy as np
 from tcod.console import Console
 from typing import Iterable, Iterator, Optional, TYPE_CHECKING
 import tile_types
-from entity import Actor
+from entity import Actor, Item
 
 if TYPE_CHECKING:
     from engine import Engine
@@ -29,6 +29,9 @@ class Gamemap:
     @property 
     def actors(self) -> Iterator[Actor]:
         yield from(entity for entity in self.entities if isinstance(entity, Actor) and entity.is_alive)
+    @property 
+    def items(self) -> Iterator[Item]:
+        yield from (entity for entity in self.entities if isinstance(entity, Item))
 
     def get_actor_at_location(self, x: int, y: int) -> Optional[Actor]:
         for actor in self.actors:
