@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import List, Tuple, TYPE_CHECKING
+from turtle import color
+from typing import List, Optional, Tuple, TYPE_CHECKING
 import numpy as np
 import tcod
-from actions import action, MeleeAction, movement_action as MovementAction, WaitAction
+import random
+from actions import Action, MeleeAction, MovementAction, WaitAction, BumpAction, WaitAction
 if TYPE_CHECKING:
     from entity import Actor
 
-class baseAI(action):
+class baseAI(Action):
     entity: Actor
     def perform(self) -> None:
         raise NotImplementedError()
@@ -38,3 +40,20 @@ class HostileEnemy(baseAI):
                 dest_x, dest_y = self.path.pop(0)
                 return MovementAction(self.entity, dest_x - self.entity.x, dest_y - self.entity.y)
         return WaitAction(self.entity)
+
+class confusedEnemy(baseAI):
+    def __init__(self, entity: Actor, previous_ai: Optional[baseAI], turns_remaining: int):
+        super().__init__(entity)
+        self.previous_ai = previous_ai
+        self.turns_remaining = turns_remaining
+
+    def perform(self) -> None:
+        if self.turns_remaining <= 0:
+            self.engine.message_log.add_message(f"The {self.entity.name} is no longer confused.", color.info)
+            self.entity.ai.perform()
+        else:
+            direction_x, direction_y = random.choice([(-1, -1), (0, -1), (1, -1),
+             (-1, 0), (1, 0),
+             (-1, 1), (0, 1), (1, 1)])
+            self.turns_remaining -= 1
+            return BumpAction(self.entity, direction_x, direction_y)

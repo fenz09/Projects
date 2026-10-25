@@ -1,10 +1,12 @@
 from __future__ import annotations
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Tuple
 import actions
 import color
+import components.ai
 from components.base_components import BaseComponent
 import components.inventory
 from exceptions import Impossible
+from input_handlers import SingleRangedAttackHandler, AreaRangedAttackHandler
 if TYPE_CHECKING:
     from entity import Actor, Item
 
@@ -34,3 +36,74 @@ class HealingConsumable(Consumable):
             self.consume()
         else:
             raise Impossible("You are already at full health.")
+class fireball_spell(Consumable):
+    def __init__(self, damage: int, radius: int):
+        self.damage = damage
+        self.radius = radius
+    def activate(self, action:actions.ItemAction) -> None:
+        consumer = action.entity
+        target = None
+        radius = self.radius + 1.0
+
+        for actor in self.engine.game_map.actors:
+            if actor is not consumer and self.parent.gamemap.visible[actor.x, actor.y]:
+                distance = consumer.distance(actor.x, actor.y)
+
+                if distance < radius:
+                    target = actor
+                    radius = distance
+            if target:
+                self.engine.message_log.add_message(f"The fireball hits {target.name} for {self.damage} damage.", color.red)
+                target.fighter.take_damage(self.damage)
+                self.consume()
+            else:
+                raise Impossible("No target in range for the fireball.")
+
+class ConfusionConsumable(Consumable):
+    def __init__(self, turns: int):
+        self.number_of_turns = turns
+
+    def get_action(self, consumer: Actor) -> Optional[actions.Action]:
+        self.engine.message_log.add_message("Select a target for the confusion spell.", color.info)
+        self.engine.event_handler = SingleRangedAttackHandler(self.engine, callback= lambda xy: actions.ItemAction(consumer, self.parent, xy),)
+        return None
+    def activate(self, action: actions.ItemAction) -> None:
+        consumer = action.entity
+        target = action.target_actor
+        if not self.engine.game_map.visible[action.target_xy]:
+            raise Impossible("You cannot target an area you cannot see.")
+        if not target:
+            raise Impossible("You must select a target for the confusion spell.")
+        if target is consumer:
+            raise Impossible("You cannot target yourself with the confusion spell.")
+        self.engine.message_log.add_message(f"{target.name} is confused for {self.number_of_turns} turns.", color.status_effect)
+        target.ai = components.ai.ConfusedEnemy(entity=target, previous_ai=target.ai, turns_remaining=self.number_of_turns)
+        self.consume()
+
+    def on_index_selected(self, xy: Tuple[int, int]) -> Optional[actions.Action]:
+        target_x, target_y = xy
+        if not self.parent.gamemap.visible[target_x, target_y]:
+            raise Impossible("You cannot target an area you cannot see.")
+        return actions.ItemAction(consumer=self.parent.gamemap.player, item=self.parent, xy=xy)
+
+class explosionSpellConsumable(Consumable):
+    def __init__(self, damage: int, radius: int):
+        self.damage = damage
+        self.radius = radius
+    def get_action(self, consumer: Actor) -> Optional[actions.Action]:
+        self.engine.message_log.add_message("Select a target for the explosion spell.", color.info)
+        self.engine.event_handler = AreaRangedAttackHandler(self.engine, radius=self.radius, callback=lambda xy: actions.ItemAction(consumer, self.parent, xy))
+        return None
+    def activate(self, action: actions.ItemAction) -> None:
+        target_xy = action.target_xy
+        if not self.engine.game_map.visible[target_xy]:
+            raise Impossible("You cannot target an area you cannot see.")
+        target_hit = False
+        for actor in self.engine.game_map.actors:
+            if actor.distance(*target_xy) <= self.radius:
+                self.engine.message_log.add_message(f"The explosion hits {actor.name} for {self.damage} damage.", color.red)
+                actor.fighter.take_damage(self.damage)
+                target_hit = True
+        if not target_hit:
+            raise Impossible("The explosion did not hit any target.")
+        self.consume()
