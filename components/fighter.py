@@ -4,7 +4,6 @@ from turtle import color
 from typing import TYPE_CHECKING
 from components.base_components import baseComponent
 from render_order import renderOrder
-from input_handlers import GameOverEventHandler as G
 if TYPE_CHECKING:
     from entity import Actor
 
@@ -28,7 +27,6 @@ class fighter(baseComponent):
         if self.engine.player is self.parent:
             death_messege = 'you died!'
             death_messege_color = color.player_die
-            self.engine.event_handler = G(self.engine)
         else:
             death_messege = f"{self.parent.name} is dead."
             death_messege_color = color.enemy_die
@@ -41,6 +39,7 @@ class fighter(baseComponent):
         self.parent.render_order = renderOrder.corpse
 
         self.engine.message_log.add_message(death_messege, death_messege_color)
+        self.engine.player.level.add_xp(self.parent.level.xp_given)
     def heal(self, amount: int ) -> int:
         if self.hp == self.max_hp:
             return 0

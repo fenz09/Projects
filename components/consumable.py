@@ -6,14 +6,14 @@ import components.ai
 from components.base_components import BaseComponent
 import components.inventory
 from exceptions import Impossible
-from input_handlers import SingleRangedAttackHandler, AreaRangedAttackHandler
+from input_handlers import ActionOrHandler, SingleRangedAttackHandler, AreaRangedAttackHandler
 if TYPE_CHECKING:
     from entity import Actor, Item
 
 class Consumable(BaseComponent):
     parent: Item
 
-    def get_action(self, consumer: Actor) -> Optional[actions.Action]:
+    def get_action(self, consumer: Actor) -> Optional[ActionOrHandler]:
         return actions.ItemAction(consumer, self.parent)
     def activate(self, action: actions.ItemAction) -> None:
         raise NotImplementedError(
@@ -63,10 +63,10 @@ class ConfusionConsumable(Consumable):
     def __init__(self, turns: int):
         self.number_of_turns = turns
 
-    def get_action(self, consumer: Actor) -> Optional[actions.Action]:
+    def get_action(self, consumer: Actor) -> SingleRangedAttackHandler:
         self.engine.message_log.add_message("Select a target for the confusion spell.", color.info)
-        self.engine.event_handler = SingleRangedAttackHandler(self.engine, callback= lambda xy: actions.ItemAction(consumer, self.parent, xy),)
-        return None
+        return SingleRangedAttackHandler(self.engine, callback= lambda xy: actions.ItemAction(consumer, self.parent, xy),)
+        
     def activate(self, action: actions.ItemAction) -> None:
         consumer = action.entity
         target = action.target_actor
@@ -90,10 +90,9 @@ class explosionSpellConsumable(Consumable):
     def __init__(self, damage: int, radius: int):
         self.damage = damage
         self.radius = radius
-    def get_action(self, consumer: Actor) -> Optional[actions.Action]:
+    def get_action(self, consumer: Actor) -> AreaRangedAttackHandler:
         self.engine.message_log.add_message("Select a target for the explosion spell.", color.info)
-        self.engine.event_handler = AreaRangedAttackHandler(self.engine, radius=self.radius, callback=lambda xy: actions.ItemAction(consumer, self.parent, xy))
-        return None
+        return AreaRangedAttackHandler(self.engine, radius=self.radius, callback=lambda xy: actions.ItemAction(consumer, self.parent, xy))
     def activate(self, action: actions.ItemAction) -> None:
         target_xy = action.target_xy
         if not self.engine.game_map.visible[target_xy]:

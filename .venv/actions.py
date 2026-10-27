@@ -51,6 +51,15 @@ class ActionWithDirection(Action):
         return self.engine.game_map.get_actor_at_location(*self.dest_xy)
     def perform(self) -> None:
         raise NotImplementedError()
+class TakeStairsAction(Action):
+    def perform(self) -> None:
+        if (self.entity.x, self.entity.y) != self.engine.game_map.downstairs_location:
+            raise exceptions.Impossible("There are no stairs here.")
+        self.engine.game_world.generate_floor()
+        self.engine.message_log.add_message("You descend the stairs.", color.info)
+        else:
+            raise exceptions.Impossible("You can't go down the stairs from here.")
+            
 class MovementAction(ActionWithDirection):
     def perform(self) -> None:
         dest_x, dest_y = self.dest_xy

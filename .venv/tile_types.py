@@ -27,7 +27,12 @@ def new_tile(
 ) -> np.ndarray:
     return np.array((walkable, transparent, dark, light), dtype=tile_dt)
 SHROUD = np.array((ord(" "), (255, 255, 255), (0, 0, 0)), dtype=graphic_dt)
-
+down_stairs = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(">"), (0, 0, 100), (50, 50, 150)),
+    light=(ord(">"), (255, 255, 255), (200, 180, 50)),
+)
 Floor = new_tile(
     walkable=True,
     transparent=True,

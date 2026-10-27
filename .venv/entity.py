@@ -1,6 +1,7 @@
 from __future__ import annotations
 import copy
 import math
+from components.levels import Level
 from components.consumable import Consumable
 from components.inventory import inventory
 from typing import Optional, Tuple, TypeVar, TYPE_CHECKING, Union
@@ -74,6 +75,7 @@ class Actor(Entity):
         ai_cls: Type[BaseAI],
         fighter: Fighter,
         inventory: inventory,
+        level: Level,
     ):
         super().__init__(x= x, y= y, char= char, color= color, name= name, blocks_movement= True)
         self.ai = ai_cls(self)
@@ -82,6 +84,8 @@ class Actor(Entity):
         self.render_order = renderOrder.actor
         self.inventory = inventory
         self.inventory.parent = self
+        self.level = level
+        self.level.parent = self
 
     @property
     def is_alive(self) -> bool:

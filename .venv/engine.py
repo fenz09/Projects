@@ -1,25 +1,31 @@
 from typing import Set, Iterable, Any
+import lzma
+import pickle
 from tcod.context import Context
 from tcod.console import Console
 from tcod.map import compute_fov
 from typing import TYPE_CHECKING
 from actions import escape_action, movement_action
-from input_handlers import MainGameEventHandler as M
-from render_functions import render_bar, render_names_at_mouse_location
+import render_functions
 from messege_log import MessageLog
 import exceptions
 if TYPE_CHECKING:
     from entity import Actor
-    from game_map import Gamemap
-    from input_handlers import EventHandler
+    from game_map import Gamemap, GameWorld
 
 class Engine:
     game_map: Gamemap
+    game_world: GameWorld
+
     def __init__(self, player: "Actor"):
         self.player = player
-        self.event_handler = M(self)
         self.mouse_location = (0, 0)
         self.message_log = MessageLog()
+
+    def save_as(self, filename: str) -> None:
+        save_data = lzma.compress(pickle.dumps(self))
+        with open(filename, "wb") as f:
+            f.write(save_data)
 
     def update_fov(self) -> None:
         self.game_map.visible[:] = compute_fov(
@@ -32,8 +38,9 @@ class Engine:
     def render(self, console: Console) -> None:
         self.game_map.render(console)
         self.message_log.render(console = console, x = 21, y = 45, width = 40, height = 5)
-        render_bar(console = console, current_value = self.player.fighter.hp, maximum_value = self.player.fighter.max_hp, total_width = 20)
-        render_names_at_mouse_location(console = console, x = 21, y = 44, engine = self)
+        render_functions.render_bar(console = console, current_value = self.player.fighter.hp, maximum_value = self.player.fighter.max_hp, total_width = 20)
+        render_functions.render_dungeon_level(console = console, dungeon_level = self.game_world.current_floor, location = (0, 47))
+        render_functions.render_names_at_mouse_location(console = console, x=21, y=44, engine = self)
 
     def handle_enemy_turns(self) -> None:
         for entity in set(self.game_map.actors) - {self.player}:
