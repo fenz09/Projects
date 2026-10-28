@@ -1,12 +1,19 @@
 from __future__ import annotations
+import tcod
 import color
-import exceptions
-from typing import Optional, Tuple, TYPE_CHECKING
-from actions import TakeStairsAction, Action, BumpAction, WaitAction, pickupAction, DropItem
-import color
+from components import exceptions
+from typing import Callable, Optional, Tuple, TYPE_CHECKING, Union
+from actions import (
+    Action,
+    BumpAction,
+    DropItem,
+    EquipAction,
+    TakeStairsAction,
+    WaitAction,
+    pickupAction,
+)
 import os
-import actions
-import exceptions
+
 MoveKeys = {
     tcod.event.K_UP: (0, -1),
     tcod.event.K_DOWN: (0, 1),
@@ -40,7 +47,7 @@ MoveKeys = {
 
 WaitKeys = {
     tcod.event.K_PERIOD,
-    tcod.event.K_KP_6,
+    tcod.event.K_KP_5,
     tcod.event.K_CLEAR,
 }
 
@@ -48,10 +55,26 @@ ConfirmKeys = {
     tcod.event.K_RETURN,
     tcod.event.K_KP_ENTER,
 }
-from typing import Union
-ActionOrHandler = Union[Action, EventHandler]
+ActionOrHandler = Union[Action, "BaseEventHandler"]
 
-class BaseEventHandler(tcod.event.EventDispatch[ActionOrHandler]):
+class BaseEventHandler:
+    def dispatch(self, event: tcod.event.Event) -> Optional[ActionOrHandler]:
+        if isinstance(event, tcod.event.Quit):
+            return self.ev_quit(event)
+        if isinstance(event, tcod.event.KeyDown):
+            handler = getattr(self, "ev_keydown", None)
+            if handler is not None:
+                return handler(event)
+        elif isinstance(event, tcod.event.MouseMotion):
+            handler = getattr(self, "ev_mousemotion", None)
+            if handler is not None:
+                return handler(event)
+        elif isinstance(event, tcod.event.MouseButtonDown):
+            handler = getattr(self, "ev_mousebuttondown", None)
+            if handler is not None:
+                return handler(event)
+        return None
+
     def handle_events(self, event: tcod.event.Event) -> BaseEventHandler:
         state = self.dispatch(event)
         if isinstance(state, BaseEventHandler):
@@ -80,14 +103,14 @@ class EventHandler(BaseEventHandler):
             if not self.engine.player.is_alive:
                 return GameOverEventHandler(self.engine)
             elif self.engine.player.level.requires_level_up:
-                return LevelUpEventHandler(self.engine)
+                return LevelUpHandler(self.engine)
             return MainGameEventHandler(self.engine)
         return self
     
 
-    def handle_action(self, action: Optional[Action]) -> None:
+    def handle_action(self, action: Optional[Action]) -> bool:
         if action is None:
-            return
+            return False
         try:
             action.perform()
         except exceptions.Impossible as e:
@@ -99,10 +122,11 @@ class EventHandler(BaseEventHandler):
         return True
         
     def ev_mousemotion(self, event: tcod.event.MouseMotion) -> None:
-        if self.engine.game_map.in_bounds(event.tile.x, event.tile.y):
-            self.engine.mouse_location = (event.tile_x, event.tile_y)
+        tile = event.integer_position
+        if self.engine.game_map.in_bounds(tile.x, tile.y):
+            self.engine.mouse_location = (tile.x, tile.y)
 
-    def ev_quit(self, event: tcod.event.Quit) -> Optional[Action]:
+    def ev_quit(self, event: tcod.event.Quit) -> None:
         raise SystemExit()
     def on_render(self, console: tcod.Console) -> None:
         self.engine.render(console)
@@ -115,7 +139,7 @@ class MainGameEventHandler(EventHandler):
         modifier = event.mod
         player = self.engine.player
         if key == tcod.event.K_PERIOD and modifier & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
-            return action.TakeStairsAction(player)
+            return TakeStairsAction(player)
 
         if key in MoveKeys:
             dx, dy = MoveKeys[key]
@@ -129,7 +153,7 @@ class MainGameEventHandler(EventHandler):
         elif key == tcod.event.K_g:
             action = pickupAction(player)
         elif key == tcod.event.K_i:
-            return InventoryHandler(self.engine)
+            return InventoryActionHandler(self.engine)
         elif key == tcod.event.K_SLASH:
             return LookHandler(self.engine)
         elif key == tcod.event.K_c:
@@ -170,6 +194,8 @@ class HistoryViewer(EventHandler):
         log_console.blit(console, 3, 3)
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[MainGameEventHandler]:
+        if self.log_length == 0:
+            return MainGameEventHandler(self.engine) if event.sym not in CURSOR_Y_KEYS else None
         if event.sym in CURSOR_Y_KEYS:
             adjust = CURSOR_Y_KEYS[event.sym]
             if adjust < 0 and self.cursor == 0:
@@ -225,14 +251,18 @@ class InventoryEventHandler(AskUserEventHandler):
         if number_of_items_in_inventory > 0:
             for i, item in enumerate(self.engine.player.inventory.items):
                 item_key = chr(ord("a") + i)
-                console.print(x + 1, y + 1 + i, f"({item_key}) {item.name}")
-            else:
-                console.print(x + 1, y + 1, "(Inventory is empty)")
+                is_equipped = self.engine.player.equipment.item_is_equipped(item)
+                item_string = f"({item_key}) {item.name}"
+                if is_equipped:
+                    item_string = f"{item_string} (E)"
+                console.print(x + 1, y + 1 + i, item_string)
+        else:
+            console.print(x + 1, y + 1, "(Inventory is empty)")
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         player = self.engine.player
         key = event.sym
         index = key - tcod.event.K_a
-        if 0 <= index <= 26:
+        if 0 <= index < 26:
             try:
                 selected_item = player.inventory.items[index]
             except IndexError:
@@ -241,13 +271,15 @@ class InventoryEventHandler(AskUserEventHandler):
             return self.on_item_selected(selected_item)
         return super().ev_keydown(event)
     def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-
-        raise NotImplementedError("on_item_selected must be implemented by a subclass.")
+        if item.consumable:
+            return item.consumable.get_action(self.engine.player)
+        elif item.equipable:
+            return EquipAction(self.engine.player, item)
+        else:
+            return None
 
 class InventoryActionHandler(InventoryEventHandler):
     TITLE = "Select an item to use"
-    def on_item_selected(self, item: Item) -> Optional[ActionOrHandler]:
-        return item.consumable.get_action(self.engine.player)
 
 class InventoryDropHandler(InventoryEventHandler):
     TITLE = "Select an item to drop"
@@ -258,17 +290,17 @@ class SelectIndexHandler(AskUserEventHandler):
     def __init__(self, engine: Engine):
         super().__init__(engine)
         player = self.engine.player
-        engine.mouse_location = None
+        engine.mouse_location = (player.x, player.y)
 
     def on_render(self, console: tcod.Console) -> None:
         super().on_render(console)
         x, y = self.engine.mouse_location
-        console.tiles_rgb[x, y][bg] = color.white
-        console.tiles_rgb[x, y][fg] = color.black
+        console.rgb[x, y]["bg"] = color.white
+        console.rgb[x, y]["fg"] = color.black
 
     def ev_keydown(self, event: tcod.event.KeyDown) -> Optional[ActionOrHandler]:
         key = event.sym
-        if key in MOVE_KEYS:
+        if key in MoveKeys:
             modifier = 1
             if event.mod & (tcod.event.KMOD_LSHIFT | tcod.event.KMOD_RSHIFT):
                 modifier *= 5
@@ -277,21 +309,22 @@ class SelectIndexHandler(AskUserEventHandler):
             if event.mod & (tcod.event.KMOD_LALT | tcod.event.KMOD_RALT):
                 modifier *= 20
             x, y = self.engine.mouse_location
-            dx, dy = MOVE_KEYS[key]
+            dx, dy = MoveKeys[key]
             x += dx * modifier
             y += dy * modifier
-            x = max(0, min(x,self.engine.gamemap.width - 1))
-            y = max(0, min(y, self.engine.gamemap.height - 1))
+            x = max(0, min(x, self.engine.game_map.width - 1))
+            y = max(0, min(y, self.engine.game_map.height - 1))
             self.engine.mouse_location = x, y
             return None
-        elif key in CONFIRM_KEYS:
+        elif key in ConfirmKeys:
             return self.on_index_selected(*self.engine.mouse_location)
         return super().ev_keydown(event)
 
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
-        if self.engine.gamemap.in_bounds(*event.tile):
+        tile = event.integer_position
+        if self.engine.game_map.in_bounds(tile.x, tile.y):
             if event.button == 1:
-                return self.on_index_selected(*event.tile)
+                return self.on_index_selected(tile.x, tile.y)
             return super().ev_mousebuttondown(event)
 
     def on_index_selected(self, x: int, y: int) -> Optional[ActionOrHandler]:
@@ -317,10 +350,10 @@ class AreaRangedAttackHandler(SelectIndexHandler):
         super().on_render(console)
         x, y = self.engine.mouse_location
         console.draw_frame(
-            x = x - self.radius + 1,
-            y = y - self.radius + 1,
-            width = self.radius ** 2,
-            height = self.radius ** 2,
+            x=x - self.radius,
+            y=y - self.radius,
+            width=2 * self.radius + 1,
+            height=2 * self.radius + 1,
             fg = color.red,
             clear = False,
         )
@@ -333,8 +366,8 @@ class PopupMessage(BaseEventHandler):
 
     def on_render(self, console: tcod.Console) -> None:
         self.parent.on_render(console)
-        console.tiles_rgb["fg"] //= 8
-        console.tiles_rgb["bg"] //= 8
+        console.rgb["fg"] //= 8
+        console.rgb["bg"] //= 8
 
         console.print(
             console.width // 2,
@@ -397,8 +430,6 @@ class LevelUpHandler(AskUserEventHandler):
                 player.level.increase_power()
             elif index == 2:
                 player.level.increase_defense()
-            else:
-                self.engine.message_log.add_message("Invalid selection.", color.red)
             return None
         return super().ev_keydown(event)
     def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Optional[ActionOrHandler]:
@@ -448,4 +479,3 @@ class CharacterScreenEventHandler(AskUserEventHandler):
             x=x + 1, y=y + 5, string=f"Defense: {self.engine.player.fighter.defense}"
         )
         
-

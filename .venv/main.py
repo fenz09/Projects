@@ -1,11 +1,11 @@
 import setup_game as se
 import tcod
-import copy
-from entity import Entity
-import color
-import traceback
-import exceptions
 import input_handlers
+from components import exceptions
+
+
+SAVE_FILE = "savegame.sav"
+
 
 def save_game(handler: input_handlers.EventHandler, filename: str) -> None:
     if isinstance(handler, input_handlers.EventHandler):
@@ -18,9 +18,9 @@ def main() -> None:
         "dejavu10x10_gs_tc.png", 32, 8, tcod.tileset.CHARMAP_TCOD)
     handler: input_handlers.BaseEventHandler = se.MainMenu()
 
-    with tcod.context.new_terminal(
-        screen_width,
-        screen_height,
+    with tcod.context.new(
+        columns=screen_width,
+        rows=screen_height,
         tileset=tileset,
         title="My Game",
         vsync=True,
@@ -32,20 +32,17 @@ def main() -> None:
                 handler.on_render(console=root_console)
                 context.present(root_console)
                 for event in tcod.event.wait():
-                    context.convert_event(event)
+                    event = context.convert_event(event)
                     handler = handler.handle_events(event)
-        except Exception:
-            traceback.print_exc()
-            if isinstance(handler, input_handlers.EventHandler):
-                handler.engine.message_log.add_message(traceback.format_exc(), color.error)
         except exceptions.QuitWithoutSaving:
             raise
         except SystemExit:
-            save_game(handler, "savefile.sav")
+            save_game(handler, SAVE_FILE)
             raise
         except BaseException:
-            save_game(handler, "savefile.sav")
+            save_game(handler, SAVE_FILE)
             raise
-       
+
+
 if __name__ == "__main__":
     main()
